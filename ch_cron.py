@@ -88,10 +88,14 @@ def process_audiofiles():
                             cmd = f'ffmpeg -i {filename} -f segment -segment_time 3600 -c copy {directory}/out%03d.aac'
                             os.system(cmd)
 
+                            for ch in sorted([str(k) for k in Path(directory).glob('out*.aac')]):
+                                cmd = f'ffmpeg -i {ch} -acodec libmp3lame {ch[:-4]}.mp3'
+                                os.system(cmd)
+
                             for user in users:
                                 logger.info(f'Sending {room_id} files to user {user} {len(users)}')
                                 counter = 1
-                                for ch in sorted([str(k) for k in Path(directory).glob('out*.aac')]):
+                                for ch in sorted([str(k) for k in Path(directory).glob('out*.mp3')]):
                                     try:
                                         logger.info(f'Sent {counter}')
                                         sleep(5)
@@ -108,13 +112,16 @@ def process_audiofiles():
                                 TASKS.update_one({'_id': room_id},
                                                  {'$pull': {'users': user}})
                         else:
+                            cmd = f'ffmpeg -i {filename} -acodec libmp3lame {directory}/{room_id}.mp3'
+                            os.system(cmd)
+
                             for user in users:
                                 logger.info(f'Sending {room_id} file to user {user} {len(users)}')
                                 try:
                                     sleep(5)
                                     Updater(TOKEN).bot.send_audio(
                                         chat_id=user,
-                                        audio=open(filename, 'rb'),
+                                        audio=open(f'{directory}/{room_id}.mp3', 'rb'),
                                         title=title)
                                 except telegram.error.Unauthorized:
                                     logger.warning(f'{user} banned the bot!')
