@@ -12,6 +12,8 @@ from time import sleep
 import shutil
 import configparser
 from clubhouse import Clubhouse
+import unicodedata
+import re
 
 import logging.config
 
@@ -61,6 +63,13 @@ QUEUE = CLIENT['clubhouse']['queue']
 logger = logging.getLogger(__name__)
 
 
+def clean_filename(filename):
+    value = str(filename)
+    value = unicodedata.normalize('NFKC', value)
+    value = re.sub(r'[^\w\s-]', '_', value)
+    return re.sub(r'[-\s]+', '-', value).strip('-_')[:250]
+
+
 def run_cmd(cmd):
     os.system(cmd)
 
@@ -82,6 +91,7 @@ def process_audiofiles():
                         filename = list(Path(directory).glob('*_*.aac'))[0]
                         filesize = Path(filename).stat().st_size
                         logger.info(f'Audio ready!: {filename} {filesize}')
+                        safe_filename = clean_filename(title)
 
                         if filesize > 30 * 1024 * 1024:
                             logger.info('Large file, chopping...')
@@ -89,17 +99,19 @@ def process_audiofiles():
                             logger.info(cmd)
                             os.system(cmd)
 
+                            c = 0
                             for ch in sorted([str(k) for k in Path(directory).glob('out*.aac')]):
-                                cmd = f'ffmpeg -i {ch} -y -acodec libmp3lame {ch[:-4]}.mp3'
+                                cmd = f'ffmpeg -i {ch} -y -acodec libmp3lame {directory}/{safe_filename}_part_{c}.mp3'
                                 logger.info(cmd)
                                 os.system(cmd)
+                                c += 1
 
                             for user in users:
                                 logger.info(f'Sending {room_id} files to user {user} {len(users)}')
                                 counter = 1
-                                for ch in sorted([str(k) for k in Path(directory).glob('out*.mp3')]):
+                                for ch in sorted([str(k) for k in Path(directory).glob('*.mp3')]):
                                     try:
-                                        logger.info(f'Sent {counter}')
+                                        logger.info(f'Sent {ch}')
                                         sleep(5)
                                         Updater(TOKEN).bot.send_audio(
                                             chat_id=user,
@@ -115,7 +127,7 @@ def process_audiofiles():
                                                  {'$pull': {'users': user}})
                         else:
                             logger.info(f'Single file')
-                            cmd = f'ffmpeg -i {filename} -y -acodec libmp3lame {directory}/{room_id}.mp3'
+                            cmd = f'ffmpeg -i {filename} -y -acodec libmp3lame {directory}/{safe_filename}.mp3'
                             logger.info(cmd)
                             os.system(cmd)
 
@@ -125,7 +137,7 @@ def process_audiofiles():
                                     sleep(5)
                                     Updater(TOKEN).bot.send_audio(
                                         chat_id=user,
-                                        audio=open(f'{directory}/{room_id}.mp3', 'rb'),
+                                        audio=open(f'{directory}/{safe_filename}.mp3', 'rb'),
                                         title=title)
                                 except telegram.error.Unauthorized:
                                     logger.warning(f'{user} banned the bot!')
