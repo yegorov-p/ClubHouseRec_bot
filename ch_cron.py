@@ -83,13 +83,15 @@ def process_audiofiles():
                         filesize = Path(filename).stat().st_size
                         logger.info(f'Audio ready!: {filename} {filesize}')
 
-                        if filesize > 40 * 1024 * 1024:
+                        if filesize > 30 * 1024 * 1024:
                             logger.info('Large file, chopping...')
-                            cmd = f'ffmpeg -i {filename} -f segment -segment_time 3600 -c copy {directory}/out%03d.aac'
+                            cmd = f'ffmpeg -i {filename} -y -f segment -segment_time 3600 -c copy {directory}/out%03d.aac'
+                            logger.info(cmd)
                             os.system(cmd)
 
                             for ch in sorted([str(k) for k in Path(directory).glob('out*.aac')]):
-                                cmd = f'ffmpeg -i {ch} -acodec libmp3lame {ch[:-4]}.mp3'
+                                cmd = f'ffmpeg -i {ch} -y -acodec libmp3lame {ch[:-4]}.mp3'
+                                logger.info(cmd)
                                 os.system(cmd)
 
                             for user in users:
@@ -112,7 +114,9 @@ def process_audiofiles():
                                 TASKS.update_one({'_id': room_id},
                                                  {'$pull': {'users': user}})
                         else:
-                            cmd = f'ffmpeg -i {filename} -acodec libmp3lame {directory}/{room_id}.mp3'
+                            logger.info(f'Single file')
+                            cmd = f'ffmpeg -i {filename} -y -acodec libmp3lame {directory}/{room_id}.mp3'
+                            logger.info(cmd)
                             os.system(cmd)
 
                             for user in users:
