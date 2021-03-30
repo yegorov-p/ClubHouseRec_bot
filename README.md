@@ -1,7 +1,7 @@
 # Installation
 
 1) Run
->apt update && apt upgrade && apt install tmux ffmpeg python3-pip mongodb mc && mkdir -p ~/agora/bin && pip3 install psutil pymongo pytz python-telegram-bot clubhouse-py
+>apt update && apt upgrade && apt install tmux ffmpeg python3-pip mongodb mc && mkdir -p ~/agora/bin && pip3 install psutil pymongo pytz python-telegram-bot clubhouse-py psutil
 
 2) Download Agora On-premise Recording SDK: https://docs.agora.io/en/All/downloads?platform=Linux
 
