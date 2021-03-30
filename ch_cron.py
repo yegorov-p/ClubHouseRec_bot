@@ -208,8 +208,7 @@ def process_token():
 
                     TASKS.delete_one({'_id': room_id})
                 else:
-                    TASKS.update_one({'_id': room_id},
-                                     {'$set': {'status': 'ERROR'}})
+                    TASKS.delete_one({'_id': room_id})
                     logger.critical('NO TOKEN! BAN???')
                     print(data)
                     for user in users:
