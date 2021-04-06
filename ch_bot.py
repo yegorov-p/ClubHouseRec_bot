@@ -1,5 +1,5 @@
 from telegram import Update
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, ConversationHandler
 import urllib.parse
 import logging.config
 from clubhouse import Clubhouse
@@ -58,6 +58,10 @@ logger = logging.getLogger(__name__)
 def start(update: Update, context: CallbackContext) -> None:
     """Send a message when the command /start is issued."""
     logger.debug(f'START from {update.message.chat_id}')
+    config = configparser.ConfigParser()
+    config.read('settings.ini')
+
+    WHITE_LIST = config['Telegram']['white_list'].split(',')
     if str(update.message.chat_id) not in WHITE_LIST:
         update.message.reply_html(
             f"We are under ban from Clubhouse. Check https://www.reddit.com/r/ClubhouseApp/comments/lqi79i/recording_clubhouse_crash_course/")
@@ -66,6 +70,10 @@ def start(update: Update, context: CallbackContext) -> None:
 
 
 def status(update: Update, context: CallbackContext) -> None:
+    config = configparser.ConfigParser()
+    config.read('settings.ini')
+
+    WHITE_LIST = config['Telegram']['white_list'].split(',')
     if str(update.message.chat_id) not in WHITE_LIST:
         logger.warning(f'Unknown user {update.message.chat_id}')
         update.message.reply_html(
@@ -87,7 +95,99 @@ def status(update: Update, context: CallbackContext) -> None:
                               )
 
 
+def auth(update: Update, context: CallbackContext) -> int:
+    config = configparser.ConfigParser()
+    config.read('settings.ini')
+
+    WHITE_LIST = config['Telegram']['white_list'].split(',')
+    if str(update.message.chat_id) not in WHITE_LIST:
+        update.message.reply_html(
+            f"We are under ban from Clubhouse. Check https://www.reddit.com/r/ClubhouseApp/comments/lqi79i/recording_clubhouse_crash_course/")
+    else:
+        user = update.message.from_user
+        logger.info("{}: AUTH".format(user.id))
+        update.message.reply_html(
+            'Send a Clubhouse invite to a fake phone number. Enter the fake phone number (+79991234567 format) or /cancel')
+        return AUTH
+
+
+def sms_code(update: Update, context: CallbackContext) -> int:
+    user = update.message.from_user
+    logger.info("{}: phone {}".format(user.id, update.message.text))
+    context.user_data['phone'] = update.message.text
+    result = empty_client.start_phone_number_auth(context.user_data['phone'])
+    if not result['success']:
+        update.message.reply_html({result['error_message']})
+        return ConversationHandler.END
+    else:
+        update.message.reply_html('Please enter the SMS verification code (1234) or /cancel')
+        return SMS_CODE
+
+
+def fake_name(update: Update, context: CallbackContext) -> int:
+    user = update.message.from_user
+    logger.info("{}: sms_code {}".format(user.id, update.message.text))
+    context.user_data['sms_code'] = update.message.text
+    result = empty_client.complete_phone_number_auth(context.user_data['phone'], context.user_data['sms_code'])
+    if not result['success']:
+        update.message.reply_html({result['error_message']})
+        return ConversationHandler.END
+    else:
+        context.user_data['user_id'] = str(result['user_profile']['user_id'])
+        context.user_data['user_token'] = result['auth_token']
+        context.user_data['user_device'] = empty_client.HEADERS.get("CH-DeviceId")
+        logger.info(f"user_id {context.user_data['user_id']}")
+        logger.info(f"user_token {context.user_data['user_token']}")
+        logger.info(f"user_device {context.user_data['user_device']}")
+        update.message.reply_html('Please enter fake user name (Ivan Petrov) or /cancel')
+        return FAKE_NAME
+
+
+def fake_login(update: Update, context: CallbackContext) -> int:
+    user = update.message.from_user
+    logger.info("{}: fake_name {}".format(user.id, update.message.text))
+    Clubhouse(user_id=context.user_data['user_id'],
+              user_token=context.user_data['user_token'],
+              user_device=context.user_data['user_device']).update_name(update.message.text)
+    update.message.reply_html('Please enter fake user login (ivanpetrov1988) or /cancel')
+    return FAKE_LOGIN
+
+
+def final(update: Update, context: CallbackContext) -> int:
+    user = update.message.from_user
+    logger.info("{}: fake_login {}".format(user.id, update.message.text))
+    Clubhouse(user_id=context.user_data['user_id'],
+              user_token=context.user_data['user_token'],
+              user_device=context.user_data['user_device']).update_username(update.message.text)
+    config = configparser.ConfigParser()
+    config.read('settings.ini')
+
+    config['Clubhouse'] = {'user_device': context.user_data['user_device'],
+                           'user_id': context.user_data['user_id'],
+                           'user_token': context.user_data['user_token']}
+
+    with open('settings.ini', 'w') as configfile:
+        config.write(configfile)
+
+    update.message.reply_html('All done.')
+    return ConversationHandler.END
+
+
+def cancel(update: Update, context: CallbackContext) -> int:
+    user = update.message.from_user
+    logger.info("User %s canceled the conversation.", user.first_name)
+    update.message.reply_text(
+        'Bye! I hope we can talk again some day.'
+    )
+
+    return ConversationHandler.END
+
+
 def room_msg(update: Update, context: CallbackContext) -> None:
+    config = configparser.ConfigParser()
+    config.read('settings.ini')
+
+    WHITE_LIST = config['Telegram']['white_list'].split(',')
     if str(update.message.chat_id) not in WHITE_LIST:
         logger.warning(f'Unknown user {update.message.chat_id}')
         update.message.reply_html(
@@ -136,6 +236,10 @@ def room_msg(update: Update, context: CallbackContext) -> None:
 
 
 def event_msg(update: Update, context: CallbackContext) -> None:
+    config = configparser.ConfigParser()
+    config.read('settings.ini')
+
+    WHITE_LIST = config['Telegram']['white_list'].split(',')
     if str(update.message.chat_id) not in WHITE_LIST:
         logger.warning(f'Unknown user {update.message.chat_id}')
         update.message.reply_html(
@@ -145,6 +249,11 @@ def event_msg(update: Update, context: CallbackContext) -> None:
     event_id = urllib.parse.urlparse(update.message.text).path.split('/')[-1]
     logger.info(f'EVENT from {update.message.chat_id}: {event_id}')
 
+    client = Clubhouse(
+        user_id=config['Clubhouse']['user_id'],
+        user_token=config['Clubhouse']['user_token'],
+        user_device=config['Clubhouse']['user_device']
+    )
     data = client.get_event(event_hashid=event_id)
 
     if data.get('success', False):
@@ -200,6 +309,10 @@ def event_msg(update: Update, context: CallbackContext) -> None:
 
 
 def kill(update: Update, context: CallbackContext) -> None:
+    config = configparser.ConfigParser()
+    config.read('settings.ini')
+
+    WHITE_LIST = config['Telegram']['white_list'].split(',')
     if str(update.message.chat_id) not in WHITE_LIST:
         logger.warning(f'Unknown user {update.message.chat_id}')
         update.message.reply_html(
@@ -223,12 +336,27 @@ def error(update: Update, context: CallbackContext):
 def main():
     """Start the bot."""
 
-    updater = Updater(TOKEN)
+    config = configparser.ConfigParser()
+    config.read('settings.ini')
+
+    updater = Updater(config['Telegram']['token'])
 
     dispatcher = updater.dispatcher
 
     dispatcher.add_handler(CommandHandler("start", start))
     dispatcher.add_handler(CommandHandler("status", status))
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler('auth', auth)],
+        states={
+            AUTH: [MessageHandler(Filters.text, sms_code)],
+            SMS_CODE: [MessageHandler(Filters.text, fake_name)],
+            FAKE_NAME: [MessageHandler(Filters.text, fake_login)],
+            FAKE_LOGIN: [MessageHandler(Filters.text, final)],
+        },
+        fallbacks=[CommandHandler('cancel', cancel)],
+    )
+
+    dispatcher.add_handler(conv_handler)
 
     dispatcher.add_handler(MessageHandler(Filters.regex('^(\/kill_.+)$'), kill))
 
@@ -242,16 +370,6 @@ def main():
 
 
 if __name__ == '__main__':
-    config = configparser.ConfigParser()
-    config.read('settings.ini')
-
-    WHITE_LIST = config['Telegram']['white_list'].split(',')
-
-    TOKEN = config['Telegram']['token']
-
-    client = Clubhouse(
-        user_id=config['Clubhouse']['user_id'],
-        user_token=config['Clubhouse']['user_token'],
-        user_device=config['Clubhouse']['user_device']
-    )
+    AUTH, SMS_CODE, FAKE_NAME, FAKE_LOGIN = range(4)
+    empty_client = Clubhouse()
     main()

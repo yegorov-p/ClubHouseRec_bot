@@ -61,11 +61,10 @@ def run_cmd(cmd, room_id):
 
 
 if __name__ == "__main__":
-    config = configparser.ConfigParser()
-    config.read('settings.ini')
-
-    UID = config['Clubhouse']['user_id']
     while True:
+        config = configparser.ConfigParser()
+        config.read('settings.ini')
+        UID = config['Clubhouse']['user_id']
         sleep(5)
         try:
             for task in TASKS.find({'status': 'GOT_TOKEN'}):
@@ -74,7 +73,7 @@ if __name__ == "__main__":
                 token = task['token']
 
                 cmd = f'./recorder_local --channel {room_id} --appId 938de3e8055e42b281bb8c6f69c21f78 --uid {UID} --channelKey {token} --appliteDir bin --isMixingEnabled 1 --isAudioOnly 1 --idle 120 --recordFileRootDir records --logLevel 2'
-
+                logger.info(cmd)
                 threading.Thread(target=run_cmd, args=(cmd,room_id,)).start()
         except:
             logger.critical(f'start_record has broken')

@@ -54,9 +54,7 @@ LOGGING = {
 }
 logging.config.dictConfig(LOGGING)
 
-CLIENT = MongoClient(host='localhost:27017',
-                     tz_aware=True,
-                     )
+CLIENT = MongoClient(host='localhost:27017', tz_aware=True)
 TASKS = CLIENT['clubhouse']['tasks']
 QUEUE = CLIENT['clubhouse']['queue']
 
@@ -76,7 +74,7 @@ def run_cmd(cmd):
 
 def process_audiofiles():
     while True:
-        sleep(20)
+        sleep(5)
         try:
             for task in TASKS.find({'status': 'DOWNLOADING'}):
                 room_id = task['_id']
@@ -113,7 +111,10 @@ def process_audiofiles():
                                     try:
                                         logger.info(f'Sent {ch}')
                                         sleep(5)
-                                        Updater(TOKEN).bot.send_audio(
+                                        config = configparser.ConfigParser()
+                                        config.read('settings.ini')
+
+                                        Updater(config['Telegram']['token']).bot.send_audio(
                                             chat_id=user,
                                             audio=open(ch, 'rb'),
                                             title=f'{title}: part {counter}')
@@ -135,7 +136,10 @@ def process_audiofiles():
                                 logger.info(f'Sending {room_id} file to user {user} {len(users)}')
                                 try:
                                     sleep(5)
-                                    Updater(TOKEN).bot.send_audio(
+                                    config = configparser.ConfigParser()
+                                    config.read('settings.ini')
+
+                                    Updater(config['Telegram']['token']).bot.send_audio(
                                         chat_id=user,
                                         audio=open(f'{directory}/{safe_filename}.mp3', 'rb'),
                                         title=title)
@@ -157,7 +161,10 @@ def process_audiofiles():
                         for user in users:
                             logger.info(f'Informing {user}')
                             try:
-                                Updater(TOKEN).bot.send_message(
+                                config = configparser.ConfigParser()
+                                config.read('settings.ini')
+
+                                Updater(config['Telegram']['token']).bot.send_message(
                                     chat_id=user,
                                     text=f"Room <b>{title}</b> was not recorded for some reason. Usually that means that there were no active speakers for several minutes.",
                                     parse_mode='html')
@@ -182,7 +189,15 @@ def process_token():
             for task in TASKS.find({'status': 'WAITING_FOR_TOKEN'}):
                 room_id = task['_id']
                 logger.info(f'Need token for {room_id}')
-                data = client.join_channel(room_id)
+                config = configparser.ConfigParser()
+                config.read('settings.ini')
+
+                data = Clubhouse(
+                    user_id=config['Clubhouse']['user_id'],
+                    user_token=config['Clubhouse']['user_token'],
+                    user_device=config['Clubhouse']['user_device']
+                ).join_channel(room_id)
+
                 users = task['users']
                 if data.get('success'):
                     token = data['token']
@@ -199,19 +214,32 @@ def process_token():
                     for user in users:
                         logger.info(f'Informing {user} about token')
                         try:
-                            Updater(TOKEN).bot.send_message(
+                            config = configparser.ConfigParser()
+                            config.read('settings.ini')
+
+                            Updater(config['Telegram']['token']).bot.send_message(
                                 chat_id=user,
                                 text=f"Recording <b>{topic}</b>. We'll notify you as soon as it's over.",
                                 parse_mode='html')
                         except telegram.error.Unauthorized:
                             logger.warning(f'{user} banned the bot!')
                     sleep(5)
-                    client.leave_channel(room_id)
+                    config = configparser.ConfigParser()
+                    config.read('settings.ini')
+
+                    Clubhouse(
+                        user_id=config['Clubhouse']['user_id'],
+                        user_token=config['Clubhouse']['user_token'],
+                        user_device=config['Clubhouse']['user_device']
+                    ).leave_channel(room_id)
                 elif 'This room is no longer available' in data.get('error_message', ''):
                     for user in users:
                         logger.info(f'Informing {user}')
                         try:
-                            Updater(TOKEN).bot.send_message(
+                            config = configparser.ConfigParser()
+                            config.read('settings.ini')
+
+                            Updater(config['Telegram']['token']).bot.send_message(
                                 chat_id=user,
                                 text=f'Planned event has either expired or we were banned by clubhouse. Sorry :(',
                                 parse_mode='html')
@@ -222,11 +250,14 @@ def process_token():
                 else:
                     TASKS.delete_one({'_id': room_id})
                     logger.critical('NO TOKEN! BAN???')
-                    print(data)
+
                     for user in users:
                         logger.info(f'Informing {user}')
                         try:
-                            Updater(TOKEN).bot.send_message(
+                            config = configparser.ConfigParser()
+                            config.read('settings.ini')
+
+                            Updater(config['Telegram']['token']).bot.send_message(
                                 chat_id=user,
                                 text=f'This is probably ban',
                                 parse_mode='html')
@@ -242,25 +273,35 @@ def process_queue():
     while True:
         try:
             for task in QUEUE.find().batch_size(5):
-                if task['time_start'] - datetime.now(timezone.utc) < timedelta(minutes=10) and not task.get('skip'):
-                    event_id = task['_id']
+                event_id = task['_id']
+                users = task['users']
+                if task['time_start'] - datetime.now(timezone.utc) < timedelta(minutes=20):
                     logger.debug(f'Tick-tock for {event_id}')
-                    users = task['users']
-                    data = client.get_event(event_hashid=event_id)
+
+                    config = configparser.ConfigParser()
+                    config.read('settings.ini')
+
+                    data = Clubhouse(
+                        user_id=config['Clubhouse']['user_id'],
+                        user_token=config['Clubhouse']['user_token'],
+                        user_device=config['Clubhouse']['user_device']
+                    ).get_event(event_hashid=event_id)
 
                     if data.get('success'):
                         ev = data['event']
                         room_id = ev['channel']
                         topic = ev['name']
 
-                        if ev['is_expired'] or (
-                                datetime.now(timezone.utc) - task['time_start'] > timedelta(minutes=65)):
+                        if ev['is_expired']:
                             logger.warning('Event expired!')
                             QUEUE.delete_one({'_id': event_id})
                             for user in users:
                                 logger.info(f'Informing {user}')
                                 try:
-                                    Updater(TOKEN).bot.send_message(
+                                    config = configparser.ConfigParser()
+                                    config.read('settings.ini')
+
+                                    Updater(config['Telegram']['token']).bot.send_message(
                                         chat_id=user,
                                         text=f'Event <b>{topic}</b> has either expired or we were banned by clubhouse',
                                         parse_mode='html')
@@ -273,7 +314,10 @@ def process_queue():
                             for user in users:
                                 logger.info(f'Informing {user}')
                                 try:
-                                    Updater(TOKEN).bot.send_message(
+                                    config = configparser.ConfigParser()
+                                    config.read('settings.ini')
+
+                                    Updater(config['Telegram']['token']).bot.send_message(
                                         chat_id=user,
                                         text=f'Event <b>{topic}</b> is private, we cannot record it.',
                                         parse_mode='html')
@@ -295,7 +339,10 @@ def process_queue():
                                 for user in users:
                                     logger.info(f'Informing {user}')
                                     try:
-                                        Updater(TOKEN).bot.send_message(
+                                        config = configparser.ConfigParser()
+                                        config.read('settings.ini')
+
+                                        Updater(config['Telegram']['token']).bot.send_message(
                                             chat_id=user,
                                             text=f'Event <b>{topic}</b> has started. Preparing to record that room. Because of some new limits from Clubhouse that can take some time.',
                                             parse_mode='html')
@@ -313,7 +360,10 @@ def process_queue():
                                 for user in users:
                                     logger.info(f'Informing {user}')
                                     try:
-                                        Updater(TOKEN).bot.send_message(
+                                        config = configparser.ConfigParser()
+                                        config.read('settings.ini')
+
+                                        Updater(config['Telegram']['token']).bot.send_message(
                                             chat_id=user,
                                             text=f'Event <b>{topic}</b> has started. Preparing to record that room. Because of some new limits from Clubhouse that can take some time.',
                                             parse_mode='html')
@@ -321,20 +371,25 @@ def process_queue():
                                         logger.warning(f'{user} banned the bot!')
 
                     else:
-                        QUEUE.update_one({'_id': event_id},
-                                         {'$set': {'skip': True}})
+                        QUEUE.delete_one({'_id': event_id})
                         logger.critical('NO TOKEN! BAN???')
 
                         for user in users:
                             logger.info(f'Informing {user}')
                             try:
-                                Updater(TOKEN).bot.send_message(
+                                config = configparser.ConfigParser()
+                                config.read('settings.ini')
+
+                                Updater(config['Telegram']['token']).bot.send_message(
                                     chat_id=user,
-                                    text=f'This is probably ban of event {event_id}',
+                                    text=f'Failed to get event {event_id}',
                                     parse_mode='html')
                             except telegram.error.Unauthorized:
                                 logger.warning(f'{user} banned the bot!')
                     sleep(15)
+                elif datetime.now(timezone.utc) - task['time_start'] > timedelta(minutes=20):
+                    logger.warning('Event expired by timeout!')
+                    QUEUE.delete_one({'_id': event_id})
         except:
             logger.critical('process_queue has broken')
             print(traceback.format_exc())
@@ -344,17 +399,6 @@ def process_queue():
 
 if __name__ == "__main__":
     logger.info('Started cron!')
-
-    config = configparser.ConfigParser()
-    config.read('settings.ini')
-
-    TOKEN = config['Telegram']['token']
-
-    client = Clubhouse(
-        user_id=config['Clubhouse']['user_id'],
-        user_token=config['Clubhouse']['user_token'],
-        user_device=config['Clubhouse']['user_device']
-    )
 
     threading.Thread(target=process_audiofiles, args=()).start()
     logger.info('Started process_audiofiles')
